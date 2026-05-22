@@ -5,48 +5,140 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nested/nested.dart';
 
-/// A class that mimics [GoRoute], but with additional support for scoped providers.
-class GoProviderRoute extends ShellProviderRoute {
-  /// Creates a [GoProviderRoute] with the given [path] and [providers].
-  ///
-  /// See [GoRoute] for more information.
-  GoProviderRoute({
+/// Creates a route with scoped providers.
+///
+/// - **Leaf routes** ([routes] is empty): returns a [GoRoute]. Modal pages such
+///   as [CupertinoSheetPage] keep their secondary transition animations
+///   (background scale/dim) because no [ShellRoute] sub-navigator is inserted.
+/// - **Shell routes** ([routes] is not empty): returns a [ShellProviderRoute]
+///   so child routes share the same provider scope.
+RouteBase GoProviderRoute({
+  required String path,
+  required List<SingleChildWidget> Function(
+    BuildContext context,
+    GoRouterState state,
+  ) providers,
+  String? name,
+  GoRouterWidgetBuilder? builder,
+  GoRouterPageBuilder? pageBuilder,
+  GoRouterRedirect? redirect,
+  ExitCallback? onExit,
+  List<RouteBase> routes = const [],
+  GlobalKey<NavigatorState>? parentNavigatorKey,
+  ShellRouteBuilder? shellBuilder,
+  ShellRoutePageBuilder? shellPageBuilder,
+}) {
+  if (routes.isEmpty) {
+    return _LeafProviderGoRoute(
+      path: path,
+      name: name,
+      providers: providers,
+      builder: builder,
+      pageBuilder: pageBuilder,
+      redirect: redirect,
+      onExit: onExit,
+      parentNavigatorKey: parentNavigatorKey,
+    );
+  }
+
+  return ShellProviderRoute(
+    providers: providers,
+    parentNavigatorKey: parentNavigatorKey,
+    redirect: redirect,
+    builder: shellBuilder,
+    pageBuilder: shellPageBuilder,
+    routes: [
+      GoRoute(
+        path: path,
+        name: name,
+        builder: builder,
+        pageBuilder: pageBuilder,
+        redirect: redirect,
+        onExit: onExit,
+        parentNavigatorKey: parentNavigatorKey,
+        routes: routes,
+      ),
+    ],
+    observers: GoProviderRouteShell.hasNotifyRootObserver
+        ? null
+        : GoProviderRouteShell.defaultObservers,
+  );
+}
+
+/// Internal helpers for shell [GoProviderRoute] setups.
+abstract final class GoProviderRouteShell {
+  GoProviderRouteShell._();
+
+  static final bool hasNotifyRootObserver =
+      ShellRoute.new.runtimeType.toString().contains('notifyRootObserver');
+
+  static final List<NavigatorObserver> defaultObservers = [
+    _NotifyObservers(),
+  ];
+}
+
+/// Leaf [GoRoute] that nests [providers] around [builder]/[pageBuilder] content.
+final class _LeafProviderGoRoute extends GoRoute {
+  _LeafProviderGoRoute({
     required String path,
-    required super.providers,
+    required List<SingleChildWidget> Function(
+      BuildContext context,
+      GoRouterState state,
+    ) providers,
     String? name,
     GoRouterWidgetBuilder? builder,
     GoRouterPageBuilder? pageBuilder,
     GoRouterRedirect? redirect,
     ExitCallback? onExit,
-    List<RouteBase> routes = const [],
-    super.parentNavigatorKey,
-    ShellRouteBuilder? shellBuilder,
-    ShellRoutePageBuilder? shellPageBuilder,
+    GlobalKey<NavigatorState>? parentNavigatorKey,
   }) : super(
-          routes: [
-            GoRoute(
-              path: path,
-              name: name,
-              builder: builder,
-              pageBuilder: pageBuilder,
-              redirect: redirect,
-              onExit: onExit,
-              routes: routes,
-            ),
-          ],
-          builder: shellBuilder,
-          pageBuilder: switch ((pageBuilder, shellPageBuilder)) {
-            (null, null) => null,
-            (_, var builder?) => builder,
-            (var builder?, _) => (context, state, child) {
-                return builder(context, state).nest((_) => child);
-              },
-          },
-          observers: hasNotifyRootObserver ? null : [_NotifyObservers()],
+          path: path,
+          name: name,
+          redirect: redirect,
+          onExit: onExit,
+          parentNavigatorKey: parentNavigatorKey,
+          pageBuilder: pageBuilder == null
+              ? null
+              : (context, state) {
+                  return pageBuilder(context, state).nest(
+                    (child) => _ProviderNest(
+                      state: state,
+                      providers: providers(context, state),
+                      child: child,
+                    ),
+                  );
+                },
+          builder: builder == null
+              ? null
+              : (context, state) {
+                  return _ProviderNest(
+                    state: state,
+                    providers: providers(context, state),
+                    child: builder(context, state),
+                  );
+                },
         );
+}
 
-  static final bool hasNotifyRootObserver =
-      ShellRoute.new.runtimeType.toString().contains('notifyRootObserver');
+class _ProviderNest extends StatelessWidget {
+  const _ProviderNest({
+    required this.state,
+    required this.providers,
+    required this.child,
+  });
+
+  final GoRouterState state;
+  final List<SingleChildWidget> providers;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Nested(
+      key: ValueKey<String>(state.uri.toString()),
+      children: providers,
+      child: child,
+    );
+  }
 }
 
 /// A class that mimics [ShellRoute], but with additional support for scoped providers.
@@ -74,15 +166,7 @@ class ShellProviderRoute extends ShellRoute {
 
   Widget _nest(BuildContext context, GoRouterState state, Widget child) {
     return Nested(
-      key: () {
-        if (this is! GoProviderRoute) return null;
-
-        final route = routes.first as GoRoute;
-        // we recreate when any parameter this route depends on changes.
-        // ignore: invalid_use_of_internal_member
-        final values = route.pathParameters.map((k) => state.pathParameters[k]);
-        return Key(values.toString());
-      }(),
+      key: ValueKey<String>(state.uri.toString()),
       children: providers(context, state),
       child: child,
     );
@@ -290,7 +374,7 @@ extension on Page {
     throw GoError(
       'Could not nest providers in page: $page (${page.runtimeType}).\n'
       'Use MaterialPage, CupertinoPage, CustomTransitionPage, or NoTransitionPage, '
-      'or implement copyWith({Widget? child}) / the PageWithChild mixin on your '
+      'or implement copyWith({Widget? child}) / the [PageWithChild] mixin on your '
       'custom Page class.',
     );
   }
