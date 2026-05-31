@@ -17,7 +17,8 @@ RouteBase GoProviderRoute({
   required List<SingleChildWidget> Function(
     BuildContext context,
     GoRouterState state,
-  ) providers,
+  )
+  providers,
   String? name,
   GoRouterWidgetBuilder? builder,
   GoRouterPageBuilder? pageBuilder,
@@ -43,6 +44,10 @@ RouteBase GoProviderRoute({
 
   return ShellProviderRoute(
     providers: providers,
+    providerKeyBuilder: (state, shellRouteContext) {
+      final matches = shellRouteContext.match.matches;
+      return matches.isEmpty ? state.pageKey : matches.first.pageKey;
+    },
     parentNavigatorKey: parentNavigatorKey,
     redirect: redirect,
     builder: shellBuilder,
@@ -69,12 +74,11 @@ RouteBase GoProviderRoute({
 abstract final class GoProviderRouteShell {
   GoProviderRouteShell._();
 
-  static final bool hasNotifyRootObserver =
-      ShellRoute.new.runtimeType.toString().contains('notifyRootObserver');
+  static final bool hasNotifyRootObserver = ShellRoute.new.runtimeType
+      .toString()
+      .contains('notifyRootObserver');
 
-  static final List<NavigatorObserver> defaultObservers = [
-    _NotifyObservers(),
-  ];
+  static final List<NavigatorObserver> defaultObservers = [_NotifyObservers()];
 }
 
 /// Leaf [GoRoute] that nests [providers] around [builder]/[pageBuilder] content.
@@ -84,7 +88,8 @@ final class _LeafProviderGoRoute extends GoRoute {
     required List<SingleChildWidget> Function(
       BuildContext context,
       GoRouterState state,
-    ) providers,
+    )
+    providers,
     String? name,
     GoRouterWidgetBuilder? builder,
     GoRouterPageBuilder? pageBuilder,
@@ -92,32 +97,32 @@ final class _LeafProviderGoRoute extends GoRoute {
     ExitCallback? onExit,
     GlobalKey<NavigatorState>? parentNavigatorKey,
   }) : super(
-          path: path,
-          name: name,
-          redirect: redirect,
-          onExit: onExit,
-          parentNavigatorKey: parentNavigatorKey,
-          pageBuilder: pageBuilder == null
-              ? null
-              : (context, state) {
-                  return pageBuilder(context, state).nest(
-                    (child) => _ProviderNest(
-                      state: state,
-                      providers: providers(context, state),
-                      child: child,
-                    ),
-                  );
-                },
-          builder: builder == null
-              ? null
-              : (context, state) {
-                  return _ProviderNest(
-                    state: state,
-                    providers: providers(context, state),
-                    child: builder(context, state),
-                  );
-                },
-        );
+         path: path,
+         name: name,
+         redirect: redirect,
+         onExit: onExit,
+         parentNavigatorKey: parentNavigatorKey,
+         pageBuilder: pageBuilder == null
+             ? null
+             : (context, state) {
+                 return pageBuilder(context, state).nest(
+                   (child) => _ProviderNest(
+                     state: state,
+                     providers: providers(context, state),
+                     child: child,
+                   ),
+                 );
+               },
+         builder: builder == null
+             ? null
+             : (context, state) {
+                 return _ProviderNest(
+                   state: state,
+                   providers: providers(context, state),
+                   child: builder(context, state),
+                 );
+               },
+       );
 }
 
 class _ProviderNest extends StatelessWidget {
@@ -149,6 +154,7 @@ class ShellProviderRoute extends ShellRoute {
   ShellProviderRoute({
     required this.providers,
     required super.routes,
+    this.providerKeyBuilder,
     super.redirect,
     super.navigatorKey,
     super.observers,
@@ -162,11 +168,22 @@ class ShellProviderRoute extends ShellRoute {
   final List<SingleChildWidget> Function(
     BuildContext context,
     GoRouterState state,
-  ) providers;
+  )
+  providers;
 
-  Widget _nest(BuildContext context, GoRouterState state, Widget child) {
+  final Key Function(GoRouterState state, ShellRouteContext shellRouteContext)?
+  providerKeyBuilder;
+
+  Widget _nest(
+    BuildContext context,
+    GoRouterState state,
+    ShellRouteContext shellRouteContext,
+    Widget child,
+  ) {
     return Nested(
-      key: ValueKey<String>(state.uri.toString()),
+      key:
+          providerKeyBuilder?.call(state, shellRouteContext) ??
+          ValueKey<String>(state.uri.toString()),
       children: providers(context, state),
       child: child,
     );
@@ -176,19 +193,23 @@ class ShellProviderRoute extends ShellRoute {
   Widget? buildWidget(context, state, shellRouteContext) {
     if (pageBuilder != null) return null;
 
-    final child = Builder(builder: (context) {
-      return super.buildWidget(context, state, shellRouteContext) ??
-          shellRouteContext.build(observers, restorationScopeId);
-    });
+    final child = Builder(
+      builder: (context) {
+        return super.buildWidget(context, state, shellRouteContext) ??
+            shellRouteContext.build(observers, restorationScopeId);
+      },
+    );
 
-    return _nest(context, state, child);
+    return _nest(context, state, shellRouteContext, child);
   }
 
   @override
   Page? buildPage(context, state, shellRouteContext) {
     final page = super.buildPage(context, state, shellRouteContext);
 
-    return page?.nest((child) => _nest(context, state, child));
+    return page?.nest(
+      (child) => _nest(context, state, shellRouteContext, child),
+    );
   }
 }
 
@@ -214,13 +235,13 @@ class ShellfulProviderRoute extends ShellfulRoute {
     super.restorationScopeId,
     super.preload,
   }) : super(
-          builder: (context, state, child) {
-            return Nested(
-              children: providers,
-              child: builder?.call(context, state, child) ?? child,
-            );
-          },
-        );
+         builder: (context, state, child) {
+           return Nested(
+             children: providers,
+             child: builder?.call(context, state, child) ?? child,
+           );
+         },
+       );
 }
 
 class ShellfulRoute extends StatefulShellRoute {
@@ -233,14 +254,11 @@ class ShellfulRoute extends StatefulShellRoute {
     super.restorationScopeId,
     bool preload = false,
   }) : super.indexedStack(
-          branches: [
-            for (final route in routes)
-              StatefulShellBranch(
-                routes: [route],
-                preload: preload,
-              )
-          ],
-        );
+         branches: [
+           for (final route in routes)
+             StatefulShellBranch(routes: [route], preload: preload),
+         ],
+       );
 }
 
 class _NotifyObservers extends NavigatorObserver {
@@ -312,46 +330,46 @@ extension on Page {
 
     return switch (this) {
       CupertinoPage page => CupertinoPage(
-          key: page.key,
-          name: page.name,
-          arguments: page.arguments,
-          allowSnapshotting: page.allowSnapshotting,
-          fullscreenDialog: page.fullscreenDialog,
-          maintainState: page.maintainState,
-          restorationId: page.restorationId,
-          title: page.title,
-          canPop: page.canPop,
-          onPopInvoked: page.onPopInvoked,
-          child: nester(page.child),
-        ),
+        key: page.key,
+        name: page.name,
+        arguments: page.arguments,
+        allowSnapshotting: page.allowSnapshotting,
+        fullscreenDialog: page.fullscreenDialog,
+        maintainState: page.maintainState,
+        restorationId: page.restorationId,
+        title: page.title,
+        canPop: page.canPop,
+        onPopInvoked: page.onPopInvoked,
+        child: nester(page.child),
+      ),
       MaterialPage page => MaterialPage(
-          key: page.key,
-          name: page.name,
-          arguments: page.arguments,
-          allowSnapshotting: page.allowSnapshotting,
-          fullscreenDialog: page.fullscreenDialog,
-          maintainState: page.maintainState,
-          restorationId: page.restorationId,
-          canPop: page.canPop,
-          onPopInvoked: page.onPopInvoked,
-          child: nester(page.child),
-        ),
+        key: page.key,
+        name: page.name,
+        arguments: page.arguments,
+        allowSnapshotting: page.allowSnapshotting,
+        fullscreenDialog: page.fullscreenDialog,
+        maintainState: page.maintainState,
+        restorationId: page.restorationId,
+        canPop: page.canPop,
+        onPopInvoked: page.onPopInvoked,
+        child: nester(page.child),
+      ),
       CustomTransitionPage page => CustomTransitionPage(
-          key: page.key,
-          name: page.name,
-          arguments: page.arguments,
-          opaque: page.opaque,
-          restorationId: page.restorationId,
-          maintainState: page.maintainState,
-          fullscreenDialog: page.fullscreenDialog,
-          barrierDismissible: page.barrierDismissible,
-          barrierColor: page.barrierColor,
-          barrierLabel: page.barrierLabel,
-          transitionsBuilder: page.transitionsBuilder,
-          transitionDuration: page.transitionDuration,
-          reverseTransitionDuration: page.reverseTransitionDuration,
-          child: nester(page.child),
-        ),
+        key: page.key,
+        name: page.name,
+        arguments: page.arguments,
+        opaque: page.opaque,
+        restorationId: page.restorationId,
+        maintainState: page.maintainState,
+        fullscreenDialog: page.fullscreenDialog,
+        barrierDismissible: page.barrierDismissible,
+        barrierColor: page.barrierColor,
+        barrierLabel: page.barrierLabel,
+        transitionsBuilder: page.transitionsBuilder,
+        transitionDuration: page.transitionDuration,
+        reverseTransitionDuration: page.reverseTransitionDuration,
+        child: nester(page.child),
+      ),
       _ => _nestCustomPage(nester),
     };
   }

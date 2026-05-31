@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.3
+
+- Fix `GoProviderRoute` recreating parent providers when navigating nested routes.
+
 ## 2.0.1
 
 - Bump `go_router` to '>=14.5.0 <18.0.0'.
